@@ -76,7 +76,7 @@ class KalmanFilter:
             ]
         )  # [2x2]
 
-    def read_csv(self, file_path="./data/WTI_Combined.csv"):
+    def read_csv(self, file_path="./data/input/WTI_Combined.csv"):
         """Reads a CSV file and returns spot and forward prices."""
         df = pd.read_csv(file_path)
         self.y_observed_list = np.log(df["Forward_Price"].values)
@@ -178,7 +178,9 @@ class KalmanFilter:
         plt.legend()
         plt.show()
 
-    def export_results_to_csv(self, file_path="./data/Kalman_Filter_Results.csv"):
+    def export_results_to_csv(
+        self, file_path="./data/output/Kalman_Filter_Results.csv"
+    ):
         """Exports the Kalman filter results to a CSV file."""
         results_df = pd.DataFrame(
             {
