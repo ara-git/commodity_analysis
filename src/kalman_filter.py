@@ -9,13 +9,13 @@ class KalmanFilter:
         params,
         T=1,
         dt=1 / 252,
-        inital_beta=[1, 1],
+        initial_beta=[1, 1],
         initial_beta_cov=np.eye(2),
     ):
         self.params = params
         self.forward_maturity = T  # maturity of forward contract
         self.dt = dt  # Daily time step
-        self.inital_beta = np.array(inital_beta).reshape(2, 1)  # [2x1]
+        self.initial_beta = np.array(initial_beta).reshape(2, 1)  # [2x1]
         self.initial_beta_cov = initial_beta_cov  # [2x2]
 
         # Prepare measurement and state equations
@@ -26,7 +26,6 @@ class KalmanFilter:
         self.sigma_1 = params["sigma_1"]
         self.sigma_2 = params["sigma_2"]
         self.sigma_3 = params["sigma_3"]
-        self.rho_1 = params["rho_1"]
         self.rho_1 = params["rho_1"]
         self.rho_2 = params["rho_2"]
         self.rho_3 = params["rho_3"]
@@ -124,13 +123,14 @@ class KalmanFilter:
     def read_csv(
         self,
         com_file_path="./data/input/WTI_Combined.csv",
-        rate_flie_path="./data/input/US_3M_rates.csv",
+        rate_file_path="./data/input/US_3M_rates.csv",
     ):
         """Reads a CSV file and returns spot and forward prices."""
         com_df = pd.read_csv(com_file_path)
-        rate_df = pd.read_csv(rate_flie_path)
+        rate_df = pd.read_csv(rate_file_path)
 
         merged_df = pd.merge(com_df, rate_df, on="Date", how="left").dropna()
+        self.Date_list = pd.to_datetime(merged_df["Date"]).values  # 日付情報を保存
         self.y_observed_list = np.log(merged_df["Forward_Price"].values)
         self.r_list = merged_df["rate"].values
 
@@ -154,7 +154,7 @@ class KalmanFilter:
 
         ###
         # Initial state
-        Beta_current = self.inital_beta  # [2x1]
+        Beta_current = self.initial_beta  # [2x1]
         Beta_cov_current = self.initial_beta_cov  # [2x2]
 
         for t in range(
@@ -217,18 +217,24 @@ class KalmanFilter:
         p = {
             "sigma_1": abs(param_vector[0]),
             "sigma_2": abs(param_vector[1]),
-            "rho": np.tanh(param_vector[2]),  # ensure -1 < rho < 1
-            "kappa": abs(param_vector[3]),
-            "alpha": param_vector[4],
-            "lambda": param_vector[5],
-            "mu": param_vector[6],
-            "sigma_e": abs(param_vector[7]),
+            "sigma_3": abs(param_vector[2]),
+            "rho_1": param_vector[3],  # ensure -1 < rho < 1
+            "rho_2": param_vector[4],  # ensure -1 < rho < 1
+            "rho_3": param_vector[5],  # ensure -1 < rho < 1
+            "kappa": abs(param_vector[6]),
+            "alpha": param_vector[7],
+            "lambda": param_vector[8],
+            "mu": param_vector[9],
+            "a": abs(param_vector[10]),
+            "m": param_vector[11],
+            "sigma_e": abs(param_vector[12]),
         }
 
         self._update_params(p)
         self.run_kalman_filter()
 
         ll = self._calculate_log_likelihood()
+        # print("ll", ll)  # 対数尤度を表示
         return -ll  # minimize negative log-likelihood
 
     def _calculate_log_likelihood(self):
@@ -242,14 +248,13 @@ class KalmanFilter:
 
     def estimate_parameters_mle(self):
         """最尤法でパラメータを推定"""
-        # Define bounds for each parameter to ensure they remain within realistic ranges
         bounds = [
             (1e-5, None),  # sigma_1
             (1e-5, None),  # sigma_2
             (1e-5, None),  # sigma_3
-            (-2, 2),  # rho1
-            (-2, 2),  # rho2
-            (-2, 2),  # rho3
+            (-1, 1),  # rho1
+            (-1, 1),  # rho2
+            (-1, 1),  # rho3
             (1e-5, None),  # kappa
             (None, None),  # alpha
             (None, None),  # lambda
@@ -259,7 +264,6 @@ class KalmanFilter:
             (1e-5, None),  # sigma_e
         ]
 
-        # ✅ initial_guessを明示的に順番指定して渡す
         initial_guess = np.array(
             [
                 self.params["sigma_1"],
@@ -283,15 +287,34 @@ class KalmanFilter:
             initial_guess,
             method="L-BFGS-B",
             bounds=bounds,
-            options={"disp": True},  # ✅ 追加：最適化の進捗を表示
+            options={"disp": True, "gtol": 1e-2, "ftol": 1e-9, "maxiter": 10},
         )
+
+        # result.x を常に反映
+        p_opt = {
+            "sigma_1": abs(result.x[0]),
+            "sigma_2": abs(result.x[1]),
+            "sigma_3": abs(result.x[2]),
+            "rho_1": result.x[3],
+            "rho_2": result.x[4],
+            "rho_3": result.x[5],
+            "kappa": abs(result.x[6]),
+            "alpha": result.x[7],
+            "lambda": result.x[8],
+            "mu": result.x[9],
+            "a": abs(result.x[10]),
+            "m": result.x[11],
+            "sigma_e": abs(result.x[12]),
+        }
+        self._update_params(p_opt)
 
         if result.success:
             print("✅ 最尤推定が収束しました！")
-            print("推定パラメータ:")
-            print(result.x)
         else:
-            print("⚠️ 最尤推定が収束しませんでした。")
+            print("⚠️ 最尤推定が収束しませんでした。途中のパラメータを反映します。")
+
+        print("推定パラメータ:")
+        print(result.x)
 
         return result
 
@@ -346,11 +369,14 @@ class KalmanFilter:
                 "Filtered_Beta_2": self.Beta_filtered_list[:, 1].flatten(),
             }
         )
+        results_df.insert(0, "Date", self.Date_list)  # 左端に日付情報を追加
         results_df.to_csv(file_path, index=False)
         print(f"Kalman filter results exported to {file_path}")
 
 
 if __name__ == "__main__":
+    estimate = True  # 最尤推定を実行するかどうか
+    # 初期パラメータ
     params = {
         "sigma_1": 0.344,
         "sigma_2": 0.372,
@@ -368,11 +394,46 @@ if __name__ == "__main__":
     }  # Schwartz (1997), Table IXの推定値
 
     ins_Kalman_filter = KalmanFilter(params)
-    ins_Kalman_filter.read_csv()
+    ins_Kalman_filter.read_csv(
+        com_file_path="./data/input/WTI_Combined.csv",
+        rate_file_path="./data/input/US_3M_rates.csv",
+    )
 
-    # result = ins_Kalman_filter.estimate_parameters_mle()
+    if estimate:
+        print("最尤推定を実行します...")
+        ins_Kalman_filter.run_kalman_filter()
+        # 1. 最尤推定
+        result = ins_Kalman_filter.estimate_parameters_mle()
+
+        # 2. result.x を params 辞書に反映
+        params.update(
+            {
+                "sigma_1": abs(result.x[0]),
+                "sigma_2": abs(result.x[1]),
+                "sigma_3": abs(result.x[2]),
+                "rho_1": result.x[3],
+                "rho_2": result.x[4],
+                "rho_3": result.x[5],
+                "kappa": abs(result.x[6]),
+                "alpha": result.x[7],
+                "lambda": result.x[8],
+                "mu": result.x[9],
+                "a": abs(result.x[10]),
+                "m": result.x[11],
+                "sigma_e": abs(result.x[12]),
+            }
+        )
+
+    # カルマンフィルタを実行
+    ins_Kalman_filter = KalmanFilter(params)
+    ins_Kalman_filter.read_csv(
+        com_file_path="./data/input/WTI_Combined.csv",
+        rate_file_path="./data/input/US_3M_rates.csv",
+    )
 
     ins_Kalman_filter.run_kalman_filter()
+
+    # 5. 結果を確認
     ins_Kalman_filter.plot_results_of_prices()
     ins_Kalman_filter.plot_results_of_beta()
     ins_Kalman_filter.export_results_to_csv()
