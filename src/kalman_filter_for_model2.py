@@ -29,74 +29,31 @@ class KalmanFilter:
         """更新されたパラメータをセット"""
         self.sigma_1 = params["sigma_1"]
         self.sigma_2 = params["sigma_2"]
-        self.sigma_3 = params["sigma_3"]
-        self.rho_1 = params["rho_1"]
-        self.rho_1 = params["rho_1"]
-        self.rho_2 = params["rho_2"]
-        self.rho_3 = params["rho_3"]
+        self.rho = params["rho"]
         self.kappa = params["kappa"]
         self.alpha = params["alpha"]
         self.lambda_ = params["lambda"]
         self.mu = params["mu"]
-        self.a = params["a"]
-        self.m = params["m"]
         self.sigma_e = params["sigma_e"]
         self.alpha_hat = self.alpha - self.lambda_ / self.kappa
 
-    def _prepare_measurement_equation(self, r_t):
+    def _prepare_measurement_equation(self):
         """Prepares the measurement equation components."""
         # intercept
-        tmp = (
-            (self.kappa * self.alpha_hat + self.sigma_1 * self.sigma_2 * self.rho_1)
-            * (
-                1
-                - np.exp(-self.kappa * self.forward_maturity)
-                - self.kappa * self.forward_maturity
-            )
-            / self.kappa**2
-        )
-        -(
-            self.sigma_2**2
-            * (
-                4 * (1 - np.exp(-self.kappa * self.forward_maturity))
-                - (1 - np.exp(-2 * self.kappa * self.forward_maturity))
-                - 2 * self.kappa * self.forward_maturity
-            )
-        ) / (4 * self.kappa**3)
-        -(
-            (self.a * self.m + self.sigma_1 * self.sigma_3 * self.rho_3)
-            * (
-                1
-                - np.exp(-self.a * self.forward_maturity)
-                - self.a * self.forward_maturity
-            )
-            / self.a**2
-        )
-        -(
-            self.sigma_3**2
-            * (
-                4 * (1 - np.exp(-self.a * self.forward_maturity))
-                - (1 - np.exp(-2 * self.a * self.forward_maturity))
-                - 2 * self.a * self.forward_maturity
-            )
-            / (4 * self.a**3)
-        )
-        +self.sigma_2 * self.sigma_3 * self.rho_2 * (
-            (
-                (1 - np.exp(-self.kappa * self.forward_maturity))
-                + (1 - np.exp(-self.a * self.forward_maturity))
-                - (1 - np.exp(-(self.kappa + self.a) * self.forward_maturity))
-            )
-            / (self.kappa * self.a * (self.kappa + self.a))
-            + (
-                self.kappa**2 * (1 - np.exp(-self.a * self.forward_maturity))
-                + self.a**2 * (1 - np.exp(-self.kappa * self.forward_maturity))
-                - self.kappa * self.a**2 * self.forward_maturity
-                - self.a * self.kappa**2 * self.forward_maturity
-            )
-            / (self.kappa**2 * self.a**2 * (self.kappa + self.a))
-        )
-        self.c = (r_t * (1 - np.exp(-self.a * self.forward_maturity)) / self.a) + tmp
+        self.c = (
+            self.rate
+            - self.alpha_hat
+            + 0.5 * self.sigma_2**2 / self.kappa**2
+            - self.sigma_1 * self.sigma_2 * self.rho / self.kappa
+        ) * self.forward_maturity
+        +0.25 * self.sigma_2**2 * (
+            1 - np.exp(-2 * self.kappa * self.forward_maturity)
+        ) / self.kappa**3
+        +(
+            self.alpha_hat * self.kappa
+            + self.sigma_1 * self.sigma_2 * self.rho
+            - self.sigma_2**2 / self.kappa
+        ) * (1 - np.exp(-self.kappa * self.forward_maturity)) / self.kappa**2
 
         # slope(Exogenous variable)
         self.X = np.array(
@@ -125,23 +82,13 @@ class KalmanFilter:
             ]
         )  # [2x2]
 
-    def read_csv(
-        self,
-        com_file_path="./data/input/WTI_Combined.csv",
-        rate_flie_path="./data/input/US_3M_rates.csv",
-    ):
+    def read_csv(self, file_path="./data/input/WTI_Combined.csv"):
         """Reads a CSV file and returns spot and forward prices."""
-        com_df = pd.read_csv(com_file_path)
-        rate_df = pd.read_csv(rate_flie_path)
-
-        merged_df = pd.merge(com_df, rate_df, on="Date", how="left")
-        self.y_observed_list = np.log(merged_df["Forward_Price"].values)
-        self.r_list = np.log(merged_df["rate"].values)
+        df = pd.read_csv(file_path)
+        self.y_observed_list = np.log(df["Forward_Price"].values)
 
     def run_kalman_filter(self):
         """Runs the Kalman filter on the spot and forward prices."""
-        # Update measurement equation with the latest interest rates
-
         self.num_of_observation = len(self.y_observed_list)
         ###
         # Initialize arrays to store results
@@ -153,9 +100,6 @@ class KalmanFilter:
         self.pred_error_list = np.zeros((self.num_of_observation, 1))
         self.pred_error_var_list = np.zeros((self.num_of_observation, 1))
 
-        # update state equation
-        self._prepare_state_equation()
-
         ###
         # Initial state
         Beta_current = self.inital_beta  # [2x1]
@@ -165,12 +109,9 @@ class KalmanFilter:
             self.num_of_observation
         ):  # t = 0, 1, 2, ..., self.num_of_observation-1
             # Prediction step
-            self._prepare_measurement_equation(
-                self.r_list[t]
-            )  # Update measurement equation with the latest interest rates
             Beta_pred, Beta_cov_pred, y_pred = self._predict_next_step(
                 Beta_current, Beta_cov_current
-            )  # [2x1], [2x2], [1x1]
+            )
 
             # Update step
             y_observed = self.y_observed_list[t]
@@ -230,6 +171,8 @@ class KalmanFilter:
         }
 
         self._update_params(p)
+        self._prepare_measurement_equation()
+        self._prepare_state_equation()
         self.run_kalman_filter()
 
         ll = self._calculate_log_likelihood()
@@ -331,22 +274,17 @@ class KalmanFilter:
 
 if __name__ == "__main__":
     params = {
-        "sigma_1": 0.344,
-        "sigma_2": 0.372,
-        "sigma_3": 0.0081,
-        "rho_1": 0.915,
-        "rho_2": -0.0039,
-        "rho_3": -0.0293,
-        "kappa": 1.314,
-        "alpha": 0.249,
-        "lambda": 0.353,
-        "mu": 0.315,
-        "a": 0.2,
-        "m": 1.0,  # not described in the paper
-        "sigma_e": 0.5,  # not described in the paper
-    }  # Table IXSchwartz (1997)の推定値
+        "sigma_1": 0.393,
+        "sigma_2": 0.527,
+        "rho": 0.766,
+        "kappa": 1.876,
+        "alpha": 0.106,
+        "lambda": 0.198,
+        "mu": 0.142,
+        "sigma_e": 0.5,
+    }
 
-    ins_Kalman_filter = KalmanFilter(params)
+    ins_Kalman_filter = KalmanFilter(params, rate=0.05)
     ins_Kalman_filter.read_csv()
 
     # ✅ initial_guessを明示的に順番指定して渡す
@@ -354,16 +292,11 @@ if __name__ == "__main__":
         [
             params["sigma_1"],
             params["sigma_2"],
-            params["sigma_3"],
-            params["rho_1"],
-            params["rho_2"],
-            params["rho_3"],
+            params["rho"],
             params["kappa"],
             params["alpha"],
             params["lambda"],
             params["mu"],
-            params["a"],
-            params["m"],
             params["sigma_e"],
         ]
     )
