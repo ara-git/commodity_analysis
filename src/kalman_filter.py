@@ -433,7 +433,7 @@ if __name__ == "__main__":
 
     ins_Kalman_filter.run_kalman_filter()
 
-    # 5. 結果を確認
+    # 結果を確認
     ins_Kalman_filter.plot_results_of_prices()
     ins_Kalman_filter.plot_results_of_beta()
     ins_Kalman_filter.export_results_to_csv()
