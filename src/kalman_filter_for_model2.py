@@ -301,11 +301,9 @@ if __name__ == "__main__":
         ]
     )
 
-    result = ins_Kalman_filter.estimate_parameters_mle(initial_guess)
+    # result = ins_Kalman_filter.estimate_parameters_mle(initial_guess)
 
-    """
     ins_Kalman_filter.run_kalman_filter()
     ins_Kalman_filter.plot_results_of_prices()
     ins_Kalman_filter.plot_results_of_beta()
     ins_Kalman_filter.export_results_to_csv()
-    """

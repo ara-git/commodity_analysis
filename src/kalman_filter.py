@@ -7,14 +7,12 @@ class KalmanFilter:
     def __init__(
         self,
         params,
-        rate,
         T=1,
         dt=1 / 252,
         inital_beta=[1, 1],
         initial_beta_cov=np.eye(2),
     ):
         self.params = params
-        self.rate = rate
         self.forward_maturity = T  # maturity of forward contract
         self.dt = dt  # Daily time step
         self.inital_beta = np.array(inital_beta).reshape(2, 1)  # [2x1]
@@ -22,8 +20,6 @@ class KalmanFilter:
 
         # Prepare measurement and state equations
         self._update_params(params)
-        self._prepare_measurement_equation()
-        self._prepare_state_equation()
 
     def _update_params(self, params):
         """更新されたパラメータをセット"""
@@ -116,10 +112,10 @@ class KalmanFilter:
             [
                 [
                     self.sigma_1**2 * self.dt,
-                    self.rho * self.sigma_1 * self.sigma_2 * self.dt,
+                    self.rho_1 * self.sigma_1 * self.sigma_2 * self.dt,
                 ],
                 [
-                    self.rho * self.sigma_1 * self.sigma_2 * self.dt,
+                    self.rho_1 * self.sigma_1 * self.sigma_2 * self.dt,
                     self.sigma_2**2 * self.dt,
                 ],
             ]
@@ -134,9 +130,9 @@ class KalmanFilter:
         com_df = pd.read_csv(com_file_path)
         rate_df = pd.read_csv(rate_flie_path)
 
-        merged_df = pd.merge(com_df, rate_df, on="Date", how="left")
+        merged_df = pd.merge(com_df, rate_df, on="Date", how="left").dropna()
         self.y_observed_list = np.log(merged_df["Forward_Price"].values)
-        self.r_list = np.log(merged_df["rate"].values)
+        self.r_list = merged_df["rate"].values
 
     def run_kalman_filter(self):
         """Runs the Kalman filter on the spot and forward prices."""
@@ -244,18 +240,43 @@ class KalmanFilter:
 
         return log_likelihood
 
-    def estimate_parameters_mle(self, initial_guess):
+    def estimate_parameters_mle(self):
         """最尤法でパラメータを推定"""
+        # Define bounds for each parameter to ensure they remain within realistic ranges
         bounds = [
             (1e-5, None),  # sigma_1
             (1e-5, None),  # sigma_2
-            (-2, 2),  # rho
+            (1e-5, None),  # sigma_3
+            (-2, 2),  # rho1
+            (-2, 2),  # rho2
+            (-2, 2),  # rho3
             (1e-5, None),  # kappa
             (None, None),  # alpha
             (None, None),  # lambda
             (None, None),  # mu
+            (None, None),  # a
+            (None, None),  # m
             (1e-5, None),  # sigma_e
         ]
+
+        # ✅ initial_guessを明示的に順番指定して渡す
+        initial_guess = np.array(
+            [
+                self.params["sigma_1"],
+                self.params["sigma_2"],
+                self.params["sigma_3"],
+                self.params["rho_1"],
+                self.params["rho_2"],
+                self.params["rho_3"],
+                self.params["kappa"],
+                self.params["alpha"],
+                self.params["lambda"],
+                self.params["mu"],
+                self.params["a"],
+                self.params["m"],
+                self.params["sigma_e"],
+            ]
+        )
 
         result = minimize(
             self.log_likelihood_wrapper,
@@ -344,35 +365,14 @@ if __name__ == "__main__":
         "a": 0.2,
         "m": 1.0,  # not described in the paper
         "sigma_e": 0.5,  # not described in the paper
-    }  # Table IXSchwartz (1997)の推定値
+    }  # Schwartz (1997), Table IXの推定値
 
     ins_Kalman_filter = KalmanFilter(params)
     ins_Kalman_filter.read_csv()
 
-    # ✅ initial_guessを明示的に順番指定して渡す
-    initial_guess = np.array(
-        [
-            params["sigma_1"],
-            params["sigma_2"],
-            params["sigma_3"],
-            params["rho_1"],
-            params["rho_2"],
-            params["rho_3"],
-            params["kappa"],
-            params["alpha"],
-            params["lambda"],
-            params["mu"],
-            params["a"],
-            params["m"],
-            params["sigma_e"],
-        ]
-    )
+    # result = ins_Kalman_filter.estimate_parameters_mle()
 
-    result = ins_Kalman_filter.estimate_parameters_mle(initial_guess)
-
-    """
     ins_Kalman_filter.run_kalman_filter()
     ins_Kalman_filter.plot_results_of_prices()
     ins_Kalman_filter.plot_results_of_beta()
     ins_Kalman_filter.export_results_to_csv()
-    """
