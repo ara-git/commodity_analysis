@@ -373,6 +373,37 @@ class KalmanFilter:
         results_df.to_csv(file_path, index=False)
         print(f"Kalman filter results exported to {file_path}")
 
+    def compare_and_export_parameters(
+        self,
+        initial_params,
+        estimated_params,
+        file_path="./data/output/Parameter_Estimation_Results.xlsx",
+    ):
+        """
+        初期パラメータと推定パラメータを比較し、Excelに出力
+        """
+        comparison_df = pd.DataFrame(
+            {
+                "Parameter": list(initial_params.keys()),
+                "Initial_Value": [initial_params[k] for k in initial_params.keys()],
+                "Estimated_Value": [
+                    estimated_params[k] for k in estimated_params.keys()
+                ],
+            }
+        )
+        comparison_df["Difference"] = (
+            comparison_df["Estimated_Value"] - comparison_df["Initial_Value"]
+        )
+
+        print("\n📊 パラメータ比較結果：")
+        print(comparison_df.to_string(index=False))
+
+        # Excel出力
+        comparison_df.to_excel(file_path, index=False)
+        print(f"\n✅ パラメータ比較結果を {file_path} に出力しました。")
+
+        return comparison_df
+
 
 if __name__ == "__main__":
     estimate = True  # 最尤推定を実行するかどうか
@@ -402,29 +433,32 @@ if __name__ == "__main__":
     if estimate:
         print("最尤推定を実行します...")
         ins_Kalman_filter.run_kalman_filter()
-        # 1. 最尤推定
         result = ins_Kalman_filter.estimate_parameters_mle()
 
-        # 2. result.x を params 辞書に反映
-        params.update(
-            {
-                "sigma_1": abs(result.x[0]),
-                "sigma_2": abs(result.x[1]),
-                "sigma_3": abs(result.x[2]),
-                "rho_1": result.x[3],
-                "rho_2": result.x[4],
-                "rho_3": result.x[5],
-                "kappa": abs(result.x[6]),
-                "alpha": result.x[7],
-                "lambda": result.x[8],
-                "mu": result.x[9],
-                "a": abs(result.x[10]),
-                "m": result.x[11],
-                "sigma_e": abs(result.x[12]),
-            }
-        )
+        # 推定後のパラメータを反映
+        estimated_params = {
+            "sigma_1": abs(result.x[0]),
+            "sigma_2": abs(result.x[1]),
+            "sigma_3": abs(result.x[2]),
+            "rho_1": result.x[3],
+            "rho_2": result.x[4],
+            "rho_3": result.x[5],
+            "kappa": abs(result.x[6]),
+            "alpha": result.x[7],
+            "lambda": result.x[8],
+            "mu": result.x[9],
+            "a": abs(result.x[10]),
+            "m": result.x[11],
+            "sigma_e": abs(result.x[12]),
+        }
 
-    # カルマンフィルタを実行
+        # 比較とExcel出力
+        ins_Kalman_filter.compare_and_export_parameters(params, estimated_params)
+
+        # 最新のパラメータで再実行
+        params.update(estimated_params)
+
+    # カルマンフィルタ再実行
     ins_Kalman_filter = KalmanFilter(params)
     ins_Kalman_filter.read_csv(
         com_file_path="./data/input/WTI_Combined.csv",
@@ -432,8 +466,6 @@ if __name__ == "__main__":
     )
 
     ins_Kalman_filter.run_kalman_filter()
-
-    # 結果を確認
     ins_Kalman_filter.plot_results_of_prices()
     ins_Kalman_filter.plot_results_of_beta()
     ins_Kalman_filter.export_results_to_csv()
